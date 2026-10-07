@@ -1,0 +1,4 @@
+yolov8n.pt
+*.log
+__pycache__/
+    
