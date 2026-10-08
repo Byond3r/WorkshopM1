@@ -1,0 +1,5 @@
+# Fichiers exécutés sur le Raspberry (Linux) : toujours en fin de ligne LF.
+# Sans ça, git sous Windows les convertit en CRLF et bash échoue avec "$'\r': command not found".
+*.sh       text eol=lf
+*.service  text eol=lf
+*.py       text eol=lf

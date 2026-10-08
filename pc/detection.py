@@ -14,7 +14,10 @@ FICHIER_MODELE = Path(__file__).resolve().parent / "yolov8n.pt"
 # Numéro de la caméra : 0 = webcam intégrée, 1 = webcam USB (en général).
 # Changeable au lancement sans modifier le code : py pc/detection.py 2
 INDEX_CAMERA = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-PI_URL = "http://10.42.0.1:5000/alerte"   # adresse du serveur Flask sur le Pi (réseau Ultron)
+# HTTPS : l'alerte est chiffrée (TLS) et on vérifie que c'est bien NOTRE Pi qui répond,
+# grâce à une copie de son certificat (scp user@10.42.0.1:/home/user/sentinel/tls/certificat.pem pc/certificat_pi.pem)
+PI_URL = "https://10.42.0.1:5443/alerte"
+FICHIER_CERTIFICAT_PI = Path(__file__).resolve().parent / "certificat_pi.pem"
 SEUIL_CONFIANCE = 0.5                      # on ignore les détections en dessous
 DELAI_ALERTES = 3                          # secondes minimum entre deux alertes
 PORT_VIDEO = 8000                          # flux visible sur http://<IP_DU_PC>:8000/video
@@ -94,13 +97,19 @@ def publier_image(frame):
 def envoyer_alerte(confiance):
     alerte = {"alerte": "intrus", "confiance": round(confiance, 2)}
     try:
-        requests.post(PI_URL, json=alerte, timeout=1)
-        print(f"Alerte envoyée : {alerte}")
+        requests.post(PI_URL, json=alerte, timeout=2, verify=str(FICHIER_CERTIFICAT_PI))
+        print(f"Alerte envoyée (chiffrée) : {alerte}")
+    except requests.exceptions.SSLError:
+        print("Certificat refusé : ce n'est pas le bon Pi, ou pc/certificat_pi.pem n'est plus à jour")
     except requests.RequestException:
         print("Pi injoignable (es-tu bien connecté à Ultron ? serveur.py lancé ?)")
 
 
 def main():
+    if not FICHIER_CERTIFICAT_PI.exists():
+        # Sans ce fichier, requests planterait à chaque alerte : on prévient dès le lancement
+        raise SystemExit(f"Certificat du Pi introuvable : {FICHIER_CERTIFICAT_PI}\n"
+                         "Copie-le avec : scp user@10.42.0.1:/home/user/sentinel/tls/certificat.pem pc/certificat_pi.pem")
     model = YOLO(FICHIER_MODELE)
     cam = cv2.VideoCapture(INDEX_CAMERA, cv2.CAP_DSHOW)
     demarrer_serveur_video()

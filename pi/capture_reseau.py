@@ -15,8 +15,16 @@ DUREE_CAPTURE = 300       # tshark est relancé toutes les 5 min : sa mémoire r
 NB_DERNIERES_TRAMES = 40
 FENETRE_DEBIT = 10        # secondes prises en compte pour calculer les paquets/s
 PREFIXE_RESEAU = "10.42.0."
-NOMS_CONNUS = {"10.42.0.1": "Raspberry Pi (serveur)", "10.42.0.189": "ESP32"}
+# Le hotspot redonne toujours la même IP à un même appareil : on peut les nommer
+NOMS_CONNUS = {
+    "10.42.0.1": "Raspberry Pi (serveur)",
+    "10.42.0.189": "ESP32",
+    "10.42.0.91": "PC portable (caméra YOLO)",
+}
+ADRESSES_NON_APPAREILS = {"10.42.0.0", "10.42.0.255"}   # adresse du réseau et broadcast
+PORTS_SENTINEL = {"5000", "5443", "8000"}   # Flask HTTP, Flask HTTPS, flux vidéo
 PROTOCOLES_EN_CLAIR = ["HTTP", "MQTT", "TELNET", "FTP"]   # contenu lisible par n'importe qui
+PROTOCOLES_CHIFFRES = ["TLS", "SSH"]                       # contenu illisible sans la clé
 # Du plus précis au plus général : le premier présent dans la pile donne le nom affiché
 PRIORITE_PROTOCOLES = ["http", "tls", "ssh", "mqtt", "dns", "mdns", "dhcp", "arp", "icmp", "tcp", "udp"]
 
@@ -24,6 +32,7 @@ CHAMPS = [
     "frame.time_epoch", "ip.src", "ip.dst", "frame.protocols", "frame.len",
     "tcp.dstport", "udp.dstport",
     "http.request.method", "http.request.uri", "http.response.code", "dns.qry.name",
+    "tcp.srcport",
 ]
 
 
@@ -41,6 +50,8 @@ class StatistiquesReseau:
         self.protocoles = Counter()
         self.appareils = {}
         self.dernieres_trames = deque(maxlen=NB_DERNIERES_TRAMES)
+        # Trafic de Sentinel-X seulement : sinon noyé dans le bruit (DNS, mises à jour Windows...)
+        self.trames_sentinel = deque(maxlen=NB_DERNIERES_TRAMES)
         self.instants_recents = deque()   # moment de chaque paquet des FENETRE_DEBIT dernières secondes
 
     def ajouter(self, trame):
@@ -50,9 +61,11 @@ class StatistiquesReseau:
             if trame["en_clair"]:
                 self.paquets_en_clair += 1
             self.dernieres_trames.appendleft(trame)
+            if trame["sentinel"]:
+                self.trames_sentinel.appendleft(trame)
             self.instants_recents.append(time.time())
             for ip in (trame["source"], trame["destination"]):
-                if ip.startswith(PREFIXE_RESEAU):
+                if ip.startswith(PREFIXE_RESEAU) and ip not in ADRESSES_NON_APPAREILS:
                     self._compter_appareil(ip, trame["taille"])
 
     def _compter_appareil(self, ip, taille):
@@ -79,8 +92,10 @@ class StatistiquesReseau:
                 "paquets_en_clair": self.paquets_en_clair,
                 "protocoles": dict(self.protocoles.most_common()),
                 "protocoles_en_clair": PROTOCOLES_EN_CLAIR,
+                "protocoles_chiffres": PROTOCOLES_CHIFFRES,
                 "appareils": [dict(appareil) for appareil in appareils],
                 "dernieres_trames": list(self.dernieres_trames),
+                "trames_sentinel": list(self.trames_sentinel),
             }
 
 
@@ -110,6 +125,7 @@ def analyser_ligne(ligne):
     valeurs += [""] * (len(CHAMPS) - len(valeurs))   # tshark omet les derniers champs vides
     champs = dict(zip(CHAMPS, valeurs))
     protocole = nom_protocole(champs["frame.protocols"])
+    ports = {champs["tcp.srcport"], champs["tcp.dstport"]}
     return {
         "heure": datetime.fromtimestamp(float(champs["frame.time_epoch"])).strftime("%H:%M:%S"),
         "source": champs["ip.src"] or "-",
@@ -118,6 +134,8 @@ def analyser_ligne(ligne):
         "taille": int(champs["frame.len"] or 0),
         "info": decrire(champs),
         "en_clair": protocole in PROTOCOLES_EN_CLAIR,
+        "chiffre": protocole in PROTOCOLES_CHIFFRES,
+        "sentinel": bool(ports & PORTS_SENTINEL),   # échange avec un service de Sentinel-X
     }
 
 
@@ -130,6 +148,7 @@ def commande_tshark():
         # Flask (5000) et le flux vidéo (8000) parlent HTTP sur des ports non standard
         "-d", "tcp.port==5000,http",
         "-d", "tcp.port==8000,http",
+        "-d", "tcp.port==5443,tls",            # HTTPS des capteurs, sur un port non standard
         "-T", "fields", "-E", "separator=/t", "-E", "occurrence=f",
     ]
     for champ in CHAMPS:

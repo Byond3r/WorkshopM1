@@ -43,4 +43,13 @@ sudo cp /home/user/sentinel/sentinel-reseau.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now sentinel-reseau
 ```
 
+**Chiffrement (HTTPS, port 5443)** : l'ESP32 et `detection.py` envoient leurs données en TLS.
+Le dashboard reste sur HTTP:5000 (consultation locale).
+```bash
+bash /home/user/sentinel/generer_certificat.sh     # sur le Pi, une fois (certificat auto-signé, 1 an)
+```
+```powershell
+scp user@10.42.0.1:/home/user/sentinel/tls/certificat.pem pc/certificat_pi.pem   # le PC vérifie le Pi
+```
+
 **ESP32** : ouvrir `esp32/esp32_sentinel.ino` dans l'Arduino IDE (COM4, « ESP32 Dev Module »).
