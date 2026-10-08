@@ -13,3 +13,7 @@ yolov8n.pt
 # Clés privées TLS : ne JAMAIS les versionner (le certificat public, lui, peut l'être)
 cle.pem
 *.key
+
+# Secrets et configuration propres au Pi (badges RFID)
+cle_api.txt
+badges_autorises.txt

@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 import time
@@ -20,6 +21,9 @@ PORT_HTTP = 5000            # dashboard (et anciens envois en clair)
 PORT_HTTPS = 5443           # envois chiffrés (TLS) de l'ESP32 et de detection.py
 CERTIFICAT_TLS = DOSSIER / "tls" / "certificat.pem"   # créés par generer_certificat.sh
 CLE_TLS = DOSSIER / "tls" / "cle.pem"
+# Badges RFID : fichiers propres au Pi, jamais versionnés dans git
+FICHIER_BADGES = DOSSIER / "badges_autorises.txt"   # une ligne par badge : UID;nom
+FICHIER_CLE_API = DOSSIER / "cle_api.txt"          # secret partagé avec l'ESP32
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +34,7 @@ log = logging.getLogger("sentinel")
 
 app = Flask(__name__)
 demarrage = datetime.now()
+systeme_arme = True   # au démarrage, le système est armé (choix le plus sûr)
 
 
 # ---------- IA : détection d'anomalies (Isolation Forest) ----------
@@ -157,20 +162,68 @@ def recevoir_mesure():
     return {"status": "ok"}
 
 
+def enregistrer_alerte(source, data):
+    """Ajoute une alerte en base, avec l'état du système au moment où elle arrive."""
+    data["systeme_arme"] = systeme_arme
+    with connexion() as conn:
+        conn.execute(
+            "INSERT INTO alertes (horodatage, source, type, donnees) VALUES (?, ?, ?, ?)",
+            (maintenant(), source, data.get("alerte"), json.dumps(data)),
+        )
+    log.info("ALERTE %s %s", source, data)
+
+
 @app.route("/alerte", methods=["POST"])
 def recevoir_alerte():
     data = request.get_json(silent=True)
     if data is None:
         log.warning("Alerte invalide reçue de %s", request.remote_addr)
         return {"status": "erreur", "message": "JSON attendu"}, 400
-
-    with connexion() as conn:
-        conn.execute(
-            "INSERT INTO alertes (horodatage, source, type, donnees) VALUES (?, ?, ?, ?)",
-            (maintenant(), request.remote_addr, data.get("alerte"), json.dumps(data)),
-        )
-    log.info("ALERTE %s %s", request.remote_addr, data)
+    enregistrer_alerte(request.remote_addr, data)
     return {"status": "ok"}
+
+
+# ---------- Badges RFID (armement / désarmement) ----------
+
+def lire_badges_autorises():
+    """{UID: nom}. Relu à chaque badge : en ajouter un ne demande pas de redémarrer le serveur."""
+    if not FICHIER_BADGES.exists():
+        return {}
+    badges = {}
+    for ligne in FICHIER_BADGES.read_text(encoding="utf-8").splitlines():
+        if ";" in ligne and not ligne.startswith("#"):
+            uid, nom = ligne.split(";", 1)
+            badges[uid.strip().upper()] = nom.strip()
+    return badges
+
+
+def cle_api_valide(cle_recue):
+    """compare_digest compare en temps constant : la durée ne trahit pas les caractères justes."""
+    if cle_recue is None or not FICHIER_CLE_API.exists():
+        return False
+    return secrets.compare_digest(cle_recue, FICHIER_CLE_API.read_text(encoding="utf-8").strip())
+
+
+@app.route("/badge", methods=["POST"])
+def recevoir_badge():
+    global systeme_arme
+    # Sans la clé, n'importe qui sur le Wi-Fi pourrait envoyer un UID et désarmer le système
+    if not cle_api_valide(request.headers.get("X-Cle-Api")):
+        log.warning("Badge refusé : clé API invalide (%s)", request.remote_addr)
+        return {"status": "erreur", "message": "clé API invalide"}, 401
+
+    data = request.get_json(silent=True) or {}
+    uid = str(data.get("uid", "")).upper()
+    badges = lire_badges_autorises()
+
+    if uid not in badges:
+        enregistrer_alerte(request.remote_addr, {"alerte": "badge_inconnu", "uid": uid})
+        return {"status": "refuse", "arme": systeme_arme}, 403
+
+    systeme_arme = not systeme_arme
+    evenement = "armement" if systeme_arme else "desarmement"
+    enregistrer_alerte(request.remote_addr, {"alerte": evenement, "uid": uid, "nom": badges[uid]})
+    return {"status": "ok", "arme": systeme_arme}
 
 
 # ---------- Lecture (pour le dashboard) ----------
@@ -222,6 +275,7 @@ def status():
         "noeuds": etat_noeuds,
         "total_alertes": nb_alertes,
         "ia": {"disponible": IA_DISPONIBLE, "entraine": modele is not None},
+        "systeme_arme": systeme_arme,
     }
 
 
