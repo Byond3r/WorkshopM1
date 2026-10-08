@@ -1,0 +1,13 @@
+[Unit]
+Description=Sentinel-X - capture reseau (tshark)
+After=network-online.target sentinel.service
+
+[Service]
+# root : la capture de paquets demande des droits administrateur
+User=root
+ExecStart=/usr/bin/python3 /home/user/sentinel/capture_reseau.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

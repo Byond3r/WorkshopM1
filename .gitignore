@@ -1,4 +1,11 @@
-yolov8n.pt
-*.log
+# Environnement Python local (se recrée avec pip)
+.venv/
 __pycache__/
-    .venv/
+
+# Modèle YOLO : retéléchargeable, trop lourd pour git
+yolov8n.pt
+
+# Données et journaux générés à l'exécution
+*.db
+*.log
+*.jsonl
