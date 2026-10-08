@@ -108,6 +108,10 @@
     <h2>Nœuds capteurs</h2>
     <ul id="noeuds"><li class="vide">Aucun nœud</li></ul>
   </div>
+  <div class="carte">
+    <h2>Capteurs du Pi</h2>
+    <ul id="capteurs-pi"><li class="vide">En attente du nœud pi-1…</li></ul>
+  </div>
 
   <div class="carte large">
     <h2>Historique des mesures</h2>
@@ -203,6 +207,37 @@ function afficherNoeuds(noeuds) {
     </li>`).join("");
 }
 
+// ---------- Capteurs physiques du Pi (capteurs_pi.py) ----------
+
+const NOEUD_PI = "pi-1";
+const DUREE_EVENEMENT = 10;   // secondes pendant lesquelles une détection reste affichée en rouge
+const CAPTEURS_PI = [
+  { champ: "proximite", nom: "Proximité (anti-sabotage)", alerte: "OBJET CONTRE LE BOÎTIER" },
+  { champ: "son", nom: "Son", alerte: "BRUIT DÉTECTÉ" },
+];
+
+// Une détection peut ne durer que 2 s : on cherche la plus récente dans l'historique
+// au lieu de lire seulement la dernière mesure (sinon on la raterait entre deux rafraîchissements)
+function derniereDetection(mesures, champ) {
+  return mesures.find(m => m.capteur === NOEUD_PI && m[champ] === 1);
+}
+
+function afficherCapteursPi(mesures) {
+  const ul = document.getElementById("capteurs-pi");
+  if (!mesures.some(m => m.capteur === NOEUD_PI)) {
+    ul.innerHTML = '<li class="vide">Aucune mesure du Pi : capteurs_pi.py est-il lancé ?</li>';
+    return;
+  }
+  ul.innerHTML = CAPTEURS_PI.map(capteur => {
+    const detection = derniereDetection(mesures, capteur.champ);
+    const ageSecondes = detection ? (Date.now() - new Date(detection.horodatage).getTime()) / 1000 : Infinity;
+    const enAlerte = ageSecondes < DUREE_EVENEMENT;
+    const etat = enAlerte ? `<b style="color:var(--alerte)">${capteur.alerte}</b>` : "calme";
+    return `<li><span class="point ${enAlerte ? "ko" : "ok"}"></span><b>${capteur.nom}</b> — ${etat}
+      <br><small style="color:var(--doux)">dernière détection : ${detection ? heure(detection.horodatage) : "aucune"}</small></li>`;
+  }).join("");
+}
+
 function afficherAlertes(alertes, total) {
   document.getElementById("nb-alertes").textContent = total ? `(${total})` : "";
   const ul = document.getElementById("alertes");
@@ -295,6 +330,7 @@ async function rafraichir() {
     afficherIA(status.ia, derniereMesureEnv);
     memoriserIpCamera(alertes.alertes);
     afficherNoeuds(status.noeuds);
+    afficherCapteursPi(mesures.mesures);
     afficherAlertes(alertes.alertes, status.total_alertes);
     dessinerGraphe(mesures.mesures);
   } catch (e) {

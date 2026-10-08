@@ -6,7 +6,7 @@ $PI = "user@10.42.0.1"
 $DOSSIER_PI = "/home/user/sentinel/"
 $FICHIERS = @(
     "pi/serveur.py", "pi/dashboard.html", "pi/capture_reseau.py", "pi/capteurs_pi.py",
-    "pi/sentinel.service", "pi/sentinel-reseau.service", "pi/installer.sh", "pi/durcir.sh",
+    "pi/sentinel.service", "pi/sentinel-reseau.service", "pi/sentinel-capteurs.service", "pi/installer.sh", "pi/durcir.sh",
     "pi/generer_certificat.sh"
 )
 
@@ -18,6 +18,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Redemarrage des services ..."
-# sentinel-reseau n'est redemarre que s'il a deja ete installe (sinon on l'ignore)
+# sentinel-reseau et sentinel-capteurs ne sont redemarres que s'ils sont installes (sinon on les ignore)
 # -t : ouvre un vrai terminal, pour que sudo puisse demander le mot de passe
-ssh -t $PI "sudo systemctl restart sentinel; systemctl is-enabled --quiet sentinel-reseau && sudo systemctl restart sentinel-reseau; systemctl is-active sentinel sentinel-reseau"
+# `$s : l'accent grave empeche PowerShell de remplacer $s ; c'est bash, sur le Pi, qui doit le lire
+ssh -t $PI "sudo systemctl restart sentinel; for s in sentinel-reseau sentinel-capteurs; do systemctl is-enabled --quiet `$s && sudo systemctl restart `$s; done; systemctl is-active sentinel sentinel-reseau sentinel-capteurs"
