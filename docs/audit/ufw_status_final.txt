@@ -1,0 +1,15 @@
+# Pare-feu ufw du Raspberry Pi, état final après durcissement (2026-10-08)
+Status: active
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     LIMIT       Anywhere                   # SSH (limite anti force brute)
+5000/tcp                   ALLOW       10.42.0.0/24               # Flask : dashboard + API, reseau Ultron seulement
+5443/tcp                   ALLOW       10.42.0.0/24               # HTTPS : envois chiffres des capteurs
+67/udp on wlan0            ALLOW       Anywhere                   # DHCP du hotspot Ultron
+53 on wlan0                ALLOW       Anywhere                   # DNS du hotspot Ultron
+22/tcp (v6)                LIMIT       Anywhere (v6)              # SSH (limite anti force brute)
+67/udp (v6) on wlan0       ALLOW       Anywhere (v6)              # DHCP du hotspot Ultron
+53 (v6) on wlan0           ALLOW       Anywhere (v6)              # DNS du hotspot Ultron
+
+Politique par défaut : deny (incoming), allow (outgoing), deny (routed)

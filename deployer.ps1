@@ -6,7 +6,8 @@ $PI = "user@10.42.0.1"
 $DOSSIER_PI = "/home/user/sentinel/"
 $FICHIERS = @(
     "pi/serveur.py", "pi/dashboard.html", "pi/capture_reseau.py", "pi/capteurs_pi.py",
-    "pi/sentinel-reseau.service", "pi/installer.sh", "pi/durcir.sh"
+    "pi/sentinel.service", "pi/sentinel-reseau.service", "pi/installer.sh", "pi/durcir.sh",
+    "pi/generer_certificat.sh"
 )
 
 Write-Host "Copie des fichiers vers $PI ..."
@@ -18,4 +19,5 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Redemarrage des services ..."
 # sentinel-reseau n'est redemarre que s'il a deja ete installe (sinon on l'ignore)
-ssh $PI "sudo systemctl restart sentinel; systemctl is-enabled --quiet sentinel-reseau && sudo systemctl restart sentinel-reseau; systemctl is-active sentinel sentinel-reseau"
+# -t : ouvre un vrai terminal, pour que sudo puisse demander le mot de passe
+ssh -t $PI "sudo systemctl restart sentinel; systemctl is-enabled --quiet sentinel-reseau && sudo systemctl restart sentinel-reseau; systemctl is-active sentinel sentinel-reseau"

@@ -1,0 +1,30 @@
+minuteur de secours : ufw disable dans 15 min
+== Pare-feu ufw : tout est refusé en entrée, sauf ce dont Sentinel-X a besoin
+
+Default incoming policy changed to 'deny'
+(be sure to update your rules accordingly)
+Default outgoing policy changed to 'allow'
+(be sure to update your rules accordingly)
+Firewall is active and enabled on system startup
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), deny (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     LIMIT IN    Anywhere                   # SSH (limite anti force brute)
+5000/tcp                   ALLOW IN    10.42.0.0/24               # Flask : dashboard + API, reseau Ultron seulement
+67/udp on wlan0            ALLOW IN    Anywhere                   # DHCP du hotspot Ultron
+53 on wlan0                ALLOW IN    Anywhere                   # DNS du hotspot Ultron
+22/tcp (v6)                LIMIT IN    Anywhere (v6)              # SSH (limite anti force brute)
+67/udp (v6) on wlan0       ALLOW IN    Anywhere (v6)              # DHCP du hotspot Ultron
+53 (v6) on wlan0           ALLOW IN    Anywhere (v6)              # DNS du hotspot Ultron
+
+== Services inutiles : rpcbind (port 111, partages NFS) ne sert à rien ici et est une cible classique
+== SSH : connexion directe en root interdite
+== Terminé. Pense à changer le mot de passe de 'user' : passwd
+--- ports encore en écoute :
+0.0.0.0:22
+0.0.0.0:5000
+[::]:22

@@ -9,3 +9,7 @@ yolov8n.pt
 *.db
 *.log
 *.jsonl
+
+# Clés privées TLS : ne JAMAIS les versionner (le certificat public, lui, peut l'être)
+cle.pem
+*.key

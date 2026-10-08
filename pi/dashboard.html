@@ -66,6 +66,7 @@
   .avertissement { color: var(--alerte); font-weight: 600; margin: 12px 0 0; }
   .barre { height: 6px; border-radius: 3px; margin-top: 4px; background: var(--accent); }
   .barre.clair { background: var(--alerte); }
+  .barre.chiffre { background: var(--ok); }
   .mono { font-family: Consolas, "Courier New", monospace; }
   .tableau-trames { max-height: 380px; overflow: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -73,6 +74,7 @@
   th { color: var(--doux); font-weight: 600; position: sticky; top: 0; background: var(--carte); }
   .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; background: var(--bord); }
   .badge.clair { background: var(--alerte); color: #fff; }
+  .badge.chiffre { background: var(--ok); color: var(--fond); }
 </style>
 </head>
 <body>
@@ -158,7 +160,11 @@
     <ul id="res-appareils"><li class="vide">En attente de la capture…</li></ul>
   </div>
   <div class="carte large">
-    <h2>Dernières trames</h2>
+    <h2>Dernières trames ·
+      <label style="text-transform:none; letter-spacing:0; cursor:pointer">
+        <input type="checkbox" id="res-tout-le-trafic"> afficher tout le trafic (sinon : Sentinel-X seulement)
+      </label>
+    </h2>
     <div class="tableau-trames">
       <table>
         <thead><tr><th>Heure</th><th>Source</th><th>Destination</th><th>Protocole</th><th>Taille</th><th>Info</th></tr></thead>
@@ -320,18 +326,26 @@ function afficherCompteursReseau(reseau) {
   document.getElementById("res-total").textContent = reseau.total_paquets ?? "--";
   document.getElementById("res-clair").textContent = reseau.paquets_en_clair ?? "--";
   document.getElementById("res-avertissement").textContent = reseau.paquets_en_clair
-    ? `⚠ ${reseau.paquets_en_clair} paquets en clair : mesures et alertes lisibles par tout appareil connecté à Ultron.`
+    ? `⚠ ${reseau.paquets_en_clair} paquets en clair depuis le début de la capture : leur contenu est lisible par tout appareil connecté à Ultron.`
     : "";
 }
 
-function afficherProtocoles(protocoles, protocolesEnClair) {
+// Classe CSS d'un protocole : rouge s'il circule en clair, vert s'il est chiffré
+function classeProtocole(nom, protocolesEnClair, protocolesChiffres) {
+  if (protocolesEnClair.includes(nom)) return "clair";
+  if (protocolesChiffres.includes(nom)) return "chiffre";
+  return "";
+}
+
+function afficherProtocoles(protocoles, protocolesEnClair, protocolesChiffres) {
   const ul = document.getElementById("res-protocoles");
-  const entrees = Object.entries(protocoles);
+  // Flask renvoie les clés JSON triées par ordre alphabétique : on retrie par nombre de paquets
+  const entrees = Object.entries(protocoles).sort(([, a], [, b]) => b - a);
   if (!entrees.length) { ul.innerHTML = '<li class="vide">Aucun paquet</li>'; return; }
   const maximum = Math.max(...entrees.map(([, nombre]) => nombre));
   ul.innerHTML = entrees.map(([nom, nombre]) => `
     <li><b>${echapperHtml(nom)}</b> <span style="color:var(--doux)">${nombre}</span>
-      <div class="barre ${protocolesEnClair.includes(nom) ? "clair" : ""}"
+      <div class="barre ${classeProtocole(nom, protocolesEnClair, protocolesChiffres)}"
            style="width:${(nombre / maximum) * 100}%"></div></li>`).join("");
 }
 
@@ -344,12 +358,19 @@ function afficherAppareils(appareils) {
         vu à ${echapperHtml(a.derniere_vue)}</small></li>`).join("");
 }
 
+function badgeProtocole(trame) {
+  const nom = echapperHtml(trame.protocole);
+  if (trame.en_clair) return `<span class="badge clair">${nom} · EN CLAIR</span>`;
+  if (trame.chiffre) return `<span class="badge chiffre">${nom} · CHIFFRÉ</span>`;
+  return `<span class="badge">${nom}</span>`;
+}
+
 function afficherTrames(trames) {
   document.getElementById("res-trames").innerHTML = trames.map(t => `
     <tr><td>${echapperHtml(t.heure)}</td>
       <td class="mono">${echapperHtml(t.source)}</td>
       <td class="mono">${echapperHtml(t.destination)}</td>
-      <td><span class="badge ${t.en_clair ? "clair" : ""}">${echapperHtml(t.protocole)}${t.en_clair ? " · EN CLAIR" : ""}</span></td>
+      <td>${badgeProtocole(t)}</td>
       <td>${t.taille} o</td>
       <td>${echapperHtml(t.info)}</td></tr>`).join("");
 }
@@ -359,9 +380,10 @@ async function rafraichirReseau() {
     const reseau = await lireJSON("/reseau");
     afficherCompteursReseau(reseau);
     if (!reseau.protocoles) return;   // capture jamais lancée : rien d'autre à afficher
-    afficherProtocoles(reseau.protocoles, reseau.protocoles_en_clair);
+    afficherProtocoles(reseau.protocoles, reseau.protocoles_en_clair, reseau.protocoles_chiffres ?? []);
     afficherAppareils(reseau.appareils);
-    afficherTrames(reseau.dernieres_trames);
+    const toutLeTrafic = document.getElementById("res-tout-le-trafic").checked;
+    afficherTrames(toutLeTrafic ? reseau.dernieres_trames : (reseau.trames_sentinel ?? []));
   } catch (e) {
     console.error(e);
   }

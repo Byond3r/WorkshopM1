@@ -1,8 +1,10 @@
 #!/bin/bash
 # Installe tshark (capture réseau) et ufw (pare-feu) en passant par le partage de connexion du téléphone.
-# La session SSH via Ultron va être coupée pendant l'installation : on lance donc le script en arrière-plan :
-#   sudo nohup bash /home/user/sentinel/installer.sh > /tmp/installation.log 2>&1 &
-# Après 5 minutes, se reconnecter à Ultron puis lire le résultat : cat /tmp/installation.log
+# La session SSH via Ultron va être coupée pendant l'installation : on confie donc le script à systemd,
+# qui le fait tourner indépendamment de la session (le mot de passe sudo est demandé AVANT de partir) :
+#   sudo systemd-run --unit=installation-sentinel bash /home/user/sentinel/installer.sh
+# Après 5 minutes, se reconnecter à Ultron puis lire le résultat :
+#   journalctl -u installation-sentinel --no-pager | tail -20
 
 CONNEXION_INTERNET="Xiaomi 17"
 CONNEXION_HOTSPOT="Ultron"

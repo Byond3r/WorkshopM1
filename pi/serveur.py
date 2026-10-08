@@ -1,11 +1,13 @@
 import json
 import logging
 import sqlite3
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, request, send_from_directory
+from werkzeug.serving import make_server
 
 # Chemins ABSOLUS : sous systemd, le dossier courant n'est pas celui du script
 DOSSIER = Path(__file__).resolve().parent
@@ -14,6 +16,10 @@ FICHIER_LOG = DOSSIER / "serveur.log"
 DELAI_HORS_LIGNE = 15  # secondes sans mesure -> nœud considéré hors ligne
 FICHIER_RESEAU = Path("/run/sentinel/reseau.json")  # écrit chaque seconde par capture_reseau.py
 DELAI_CAPTURE_ARRETEE = 10  # fichier plus vieux que ça -> la capture est considérée arrêtée
+PORT_HTTP = 5000            # dashboard (et anciens envois en clair)
+PORT_HTTPS = 5443           # envois chiffrés (TLS) de l'ESP32 et de detection.py
+CERTIFICAT_TLS = DOSSIER / "tls" / "certificat.pem"   # créés par generer_certificat.sh
+CLE_TLS = DOSSIER / "tls" / "cle.pem"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -238,9 +244,24 @@ def dashboard():
     return send_from_directory(DOSSIER, "dashboard.html")
 
 
+# ---------- Démarrage ----------
+
+def demarrer_https():
+    """Second accès, chiffré (TLS), à la même application. Sans certificat, le serveur tourne quand même."""
+    if not (CERTIFICAT_TLS.exists() and CLE_TLS.exists()):
+        log.warning("Certificat TLS absent (%s) : HTTPS désactivé", CERTIFICAT_TLS)
+        return
+    serveur_https = make_server(
+        "0.0.0.0", PORT_HTTPS, app, threaded=True, ssl_context=(str(CERTIFICAT_TLS), str(CLE_TLS))
+    )
+    threading.Thread(target=serveur_https.serve_forever, daemon=True).start()
+    log.info("HTTPS actif sur le port %d", PORT_HTTPS)
+
+
 init_bdd()
 entrainer()   # si la base contient déjà assez de mesures, le modèle est prêt dès le démarrage
 
 if __name__ == "__main__":
     log.info("Serveur Sentinel démarré (base : %s)", FICHIER_BDD)
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    demarrer_https()
+    app.run(host="0.0.0.0", port=PORT_HTTP, threaded=True)

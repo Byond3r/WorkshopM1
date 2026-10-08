@@ -1,0 +1,21 @@
+# Ports en écoute sur le Pi AVANT durcissement (2026-10-08 13:55)
+Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                                   
+udp   UNCONN 0      0            0.0.0.0:32790      0.0.0.0:*    users:(("avahi-daemon",pid=647,fd=14))                   
+udp   UNCONN 0      0            0.0.0.0:111        0.0.0.0:*    users:(("rpcbind",pid=608,fd=5),("systemd",pid=1,fd=155))
+udp   UNCONN 0      0            0.0.0.0:5353       0.0.0.0:*    users:(("avahi-daemon",pid=647,fd=12))                   
+udp   UNCONN 0      0                  *:111              *:*    users:(("rpcbind",pid=608,fd=7),("systemd",pid=1,fd=157))
+udp   UNCONN 0      0                  *:5353             *:*    users:(("avahi-daemon",pid=647,fd=13))                   
+udp   UNCONN 0      0                  *:57626            *:*    users:(("avahi-daemon",pid=647,fd=15))                   
+tcp   LISTEN 0      128          0.0.0.0:5000       0.0.0.0:*    users:(("python3",pid=3420,fd=6))                        
+tcp   LISTEN 0      4096         0.0.0.0:111        0.0.0.0:*    users:(("rpcbind",pid=608,fd=4),("systemd",pid=1,fd=154))
+tcp   LISTEN 0      128          0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=935,fd=6))                            
+tcp   LISTEN 0      4096            [::]:111           [::]:*    users:(("rpcbind",pid=608,fd=6),("systemd",pid=1,fd=156))
+tcp   LISTEN 0      128             [::]:22            [::]:*    users:(("sshd",pid=935,fd=7))                            
+
+# Pare-feu :
+Status: inactive
+# Connexions NetworkManager :
+Xiaomi 17:802-11-wireless
+lo:loopback
+Ultron:802-11-wireless
+Wired connection 1:802-3-ethernet

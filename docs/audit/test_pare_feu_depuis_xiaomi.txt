@@ -1,0 +1,4 @@
+# Test TCP depuis le PC sur le réseau Xiaomi (hors Ultron) vers le Pi, APRÈS durcissement
+port    22 : OUVERT                                 attendu : ouvert (SSH limité)
+port  5000 : FILTRÉ (le pare-feu ne répond pas)     attendu : bloqué : Flask réservé à Ultron
+port   111 : FILTRÉ (le pare-feu ne répond pas)     attendu : bloqué : rpcbind désactivé
