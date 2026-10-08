@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel-X</title>
+<style>
+  /* Aucune ressource externe : le réseau Ultron n'a pas internet */
+  :root {
+    --fond: #0b0f14; --carte: #131a22; --bord: #1f2a36; --texte: #d7e0ea;
+    --doux: #7d8b99; --ok: #2ecc71; --alerte: #ff4757; --accent: #00d2d3; --gaz: #ffa502;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fond); color: var(--texte);
+         font-family: "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between;
+           padding: 16px 24px; border-bottom: 1px solid var(--bord); }
+  h1 { margin: 0; font-size: 22px; letter-spacing: 2px; }
+  h1 span { color: var(--accent); }
+  #serveur { font-size: 14px; color: var(--doux); }
+  .point { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+           margin-right: 6px; background: var(--doux); }
+  .point.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .point.ko { background: var(--alerte); box-shadow: 0 0 8px var(--alerte); }
+  main { padding: 20px 24px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .carte { background: var(--carte); border: 1px solid var(--bord);
+           border-radius: 10px; padding: 16px; }
+  .carte h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+              letter-spacing: 1px; color: var(--doux); font-weight: 600; }
+  .valeur { font-size: 44px; font-weight: 700; }
+  .unite { font-size: 18px; color: var(--doux); margin-left: 4px; }
+  .large { grid-column: 1 / -1; }
+  canvas { width: 100%; height: 220px; display: block; }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+  li { padding: 8px 0; border-bottom: 1px solid var(--bord); font-size: 14px; }
+  li:last-child { border-bottom: none; }
+  .vide { color: var(--doux); font-style: italic; }
+  .legende span { margin-right: 16px; font-size: 13px; }
+  /* Bandeau rouge qui clignote quand un intrus vient d'être détecté */
+  #bandeau { display: none; background: var(--alerte); color: #fff; text-align: center;
+             padding: 12px; font-weight: 700; letter-spacing: 2px;
+             animation: clignote 1s infinite; }
+  @keyframes clignote { 50% { opacity: .55; } }
+  /* Onglets : un seul <main class="onglet"> visible à la fois */
+  nav { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--bord); }
+  nav button { background: none; border: none; border-bottom: 2px solid transparent;
+               color: var(--doux); font: inherit; font-size: 14px; padding: 12px 16px; cursor: pointer; }
+  nav button.actif { color: var(--accent); border-bottom-color: var(--accent); }
+  .onglet { display: none; }
+  .onglet.actif { display: grid; }
+  /* Onglet caméra */
+  .reglage-camera { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .reglage-camera input { background: var(--fond); color: var(--texte); border: 1px solid var(--bord);
+                          border-radius: 6px; padding: 6px 10px; font: inherit; width: 140px; }
+  .reglage-camera button { background: var(--accent); color: var(--fond); border: none; border-radius: 6px;
+                           padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  .zone-video { background: #000; border-radius: 8px; min-height: 320px;
+                display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #flux { max-width: 100%; display: none; }
+  #flux-erreur { padding: 24px; text-align: center; }
+  /* Onglet réseau */
+  .compteurs { display: flex; flex-wrap: wrap; gap: 32px; }
+  .compteurs small { display: block; color: var(--doux); font-size: 12px;
+                     text-transform: uppercase; letter-spacing: 1px; }
+  .avertissement { color: var(--alerte); font-weight: 600; margin: 12px 0 0; }
+  .barre { height: 6px; border-radius: 3px; margin-top: 4px; background: var(--accent); }
+  .barre.clair { background: var(--alerte); }
+  .mono { font-family: Consolas, "Courier New", monospace; }
+  .tableau-trames { max-height: 380px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord); white-space: nowrap; }
+  th { color: var(--doux); font-weight: 600; position: sticky; top: 0; background: var(--carte); }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; background: var(--bord); }
+  .badge.clair { background: var(--alerte); color: #fff; }
+</style>
+</head>
+<body>
+<div id="bandeau">⚠ INTRUSION DÉTECTÉE ⚠</div>
+<header>
+  <h1>SENTINEL<span>-X</span></h1>
+  <div id="serveur"><span class="point" id="point-serveur"></span><span id="txt-serveur">Connexion…</span></div>
+</header>
+
+<nav>
+  <button data-onglet="vue" class="actif">Vue d'ensemble</button>
+  <button data-onglet="camera">Caméra</button>
+  <button data-onglet="reseau">Réseau / Cyber</button>
+</nav>
+
+<main id="onglet-vue" class="onglet actif">
+  <div class="carte">
+    <h2>Température</h2>
+    <div><span class="valeur" id="temp">--</span><span class="unite">°C</span></div>
+  </div>
+  <div class="carte">
+    <h2>Gaz</h2>
+    <div><span class="valeur" id="gaz">--</span><span class="unite">ppm</span></div>
+  </div>
+  <div class="carte">
+    <h2>IA · Anomalies (Isolation Forest)</h2>
+    <div><span class="valeur" id="ia" style="font-size:32px">--</span></div>
+    <small id="ia-detail" style="color:var(--doux)"></small>
+  </div>
+  <div class="carte">
+    <h2>Nœuds capteurs</h2>
+    <ul id="noeuds"><li class="vide">Aucun nœud</li></ul>
+  </div>
+
+  <div class="carte large">
+    <h2>Historique des mesures</h2>
+    <div class="legende">
+      <span style="color:var(--accent)">● Température (°C)</span>
+      <span style="color:var(--gaz)">● Gaz (ppm)</span>
+    </div>
+    <canvas id="graphe"></canvas>
+  </div>
+
+  <div class="carte large">
+    <h2>Alertes intrusion <span id="nb-alertes"></span></h2>
+    <ul id="alertes"><li class="vide">Aucune alerte</li></ul>
+  </div>
+</main>
+
+<main id="onglet-camera" class="onglet">
+  <div class="carte large">
+    <h2>Caméra · détection YOLOv8n en direct (PC)</h2>
+    <div class="reglage-camera">
+      <label for="ip-camera">IP du PC caméra</label>
+      <input id="ip-camera" placeholder="10.42.0.x">
+      <button id="btn-camera">Connecter</button>
+      <small id="etat-camera" style="color:var(--doux)"></small>
+    </div>
+    <div class="zone-video">
+      <img id="flux" alt="Flux vidéo de la caméra avec les détections YOLO">
+      <div id="flux-erreur" class="vide">Flux non connecté</div>
+    </div>
+  </div>
+</main>
+
+<main id="onglet-reseau" class="onglet">
+  <div class="carte large">
+    <h2>Capture réseau en direct · tshark (moteur de Wireshark) sur le Wi-Fi Ultron</h2>
+    <div class="compteurs">
+      <div><small>Capture</small><span class="valeur" id="res-etat" style="font-size:28px">--</span></div>
+      <div><small>Paquets / s</small><span class="valeur" id="res-debit">--</span></div>
+      <div><small>Paquets capturés</small><span class="valeur" id="res-total">--</span></div>
+      <div><small>Paquets en clair</small><span class="valeur" id="res-clair" style="color:var(--alerte)">--</span></div>
+    </div>
+    <p id="res-avertissement" class="avertissement"></p>
+  </div>
+  <div class="carte">
+    <h2>Protocoles</h2>
+    <ul id="res-protocoles"><li class="vide">En attente de la capture…</li></ul>
+  </div>
+  <div class="carte">
+    <h2>Appareils vus sur Ultron</h2>
+    <ul id="res-appareils"><li class="vide">En attente de la capture…</li></ul>
+  </div>
+  <div class="carte large">
+    <h2>Dernières trames</h2>
+    <div class="tableau-trames">
+      <table>
+        <thead><tr><th>Heure</th><th>Source</th><th>Destination</th><th>Protocole</th><th>Taille</th><th>Info</th></tr></thead>
+        <tbody id="res-trames"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const INTERVALLE = 2000;          // rafraîchissement toutes les 2 s
+const DUREE_BANDEAU = 10;         // secondes d'affichage du bandeau après une alerte
+
+async function lireJSON(url) {
+  const rep = await fetch(url, { cache: "no-store" });
+  if (!rep.ok) throw new Error(url + " -> " + rep.status);
+  return rep.json();
+}
+
+function heure(iso) { return iso.slice(11, 19); }   // "2026-10-07T10:41:12" -> "10:41:12"
+
+// Tout texte venant du réseau (JSON reçu, paquets capturés) peut avoir été écrit par un attaquant.
+// On l'échappe avant de l'insérer dans la page : sinon il pourrait y injecter du JavaScript (faille XSS).
+function echapperHtml(texte) {
+  const remplacements = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(texte ?? "").replace(/[&<>"']/g, caractere => remplacements[caractere]);
+}
+
+function afficherNoeuds(noeuds) {
+  const ul = document.getElementById("noeuds");
+  if (!noeuds.length) { ul.innerHTML = '<li class="vide">Aucun nœud</li>'; return; }
+  ul.innerHTML = noeuds.map(n => `
+    <li><span class="point ${n.en_ligne ? "ok" : "ko"}"></span>
+      <b>${echapperHtml(n.capteur ?? "?")}</b> (${echapperHtml(n.source)}) — ${n.en_ligne ? "en ligne" : "HORS LIGNE"}
+      <br><small style="color:var(--doux)">dernière mesure ${heure(n.derniere_mesure)} · ${n.total_mesures} mesures</small>
+    </li>`).join("");
+}
+
+function afficherAlertes(alertes, total) {
+  document.getElementById("nb-alertes").textContent = total ? `(${total})` : "";
+  const ul = document.getElementById("alertes");
+  if (!alertes.length) { ul.innerHTML = '<li class="vide">Aucune alerte</li>'; }
+  else {
+    ul.innerHTML = alertes.map(a => `
+      <li><span class="point ko"></span><b>${heure(a.horodatage)}</b> —
+        ${echapperHtml(String(a.alerte ?? "alerte").toUpperCase())}
+        ${a.confiance !== undefined ? ` · confiance ${Math.round(a.confiance * 100)} %` : ""}
+        <small style="color:var(--doux)"> · ${echapperHtml(a.source)}</small></li>`).join("");
+  }
+  // Bandeau si la dernière alerte date de moins de DUREE_BANDEAU secondes
+  const recente = alertes.length &&
+    (Date.now() - new Date(alertes[0].horodatage).getTime()) / 1000 < DUREE_BANDEAU;
+  document.getElementById("bandeau").style.display = recente ? "block" : "none";
+}
+
+function afficherIA(ia, mesure) {
+  const el = document.getElementById("ia"), detail = document.getElementById("ia-detail");
+  if (!ia || !ia.disponible) { el.textContent = "INDISPONIBLE"; el.style.color = "var(--doux)";
+    detail.textContent = "scikit-learn non installé sur le Pi"; return; }
+  if (!ia.entraine || !mesure || mesure.anomalie === undefined) {
+    el.textContent = "APPRENTISSAGE"; el.style.color = "var(--gaz)";
+    detail.textContent = "Le modèle apprend le comportement normal (30 mesures)"; return; }
+  el.textContent = mesure.anomalie ? "ANOMALIE" : "NORMAL";
+  el.style.color = mesure.anomalie ? "var(--alerte)" : "var(--ok)";
+  detail.textContent = `score ${mesure.score_anomalie} · dernière mesure ${heure(mesure.horodatage)}`;
+}
+
+// Graphe dessiné à la main sur un canvas (pas de bibliothèque : pas d'internet)
+function dessinerGraphe(mesures) {
+  const canvas = document.getElementById("graphe");
+  const ctx = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = canvas.clientHeight * ratio;
+  ctx.scale(ratio, ratio);
+  const L = canvas.clientWidth, H = canvas.clientHeight, marge = 30;
+  ctx.clearRect(0, 0, L, H);
+
+  const points = mesures.slice().reverse();   // du plus ancien au plus récent
+  if (points.length < 2) return;
+
+  // Lignes de repère
+  ctx.strokeStyle = "#1f2a36"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = marge / 2 + i * (H - marge) / 4;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(L, y); ctx.stroke();
+  }
+
+  function courbe(cle, couleur) {
+    const valeurs = points.map(p => p[cle]).filter(v => typeof v === "number");
+    if (valeurs.length < 2) return;
+    const min = Math.min(...valeurs), max = Math.max(...valeurs);
+    const plage = (max - min) || 1;
+    ctx.strokeStyle = couleur; ctx.lineWidth = 2; ctx.beginPath();
+    points.forEach((p, i) => {
+      if (typeof p[cle] !== "number") return;
+      const x = (i / (points.length - 1)) * L;
+      const y = marge / 2 + (1 - (p[cle] - min) / plage) * (H - marge);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  courbe("temperature", "#00d2d3");
+  courbe("gaz", "#ffa502");
+
+  // Heures de début et de fin sous le graphe
+  ctx.fillStyle = "#7d8b99"; ctx.font = "12px Segoe UI";
+  ctx.fillText(heure(points[0].horodatage), 2, H - 4);
+  const fin = heure(points[points.length - 1].horodatage);
+  ctx.fillText(fin, L - ctx.measureText(fin).width - 2, H - 4);
+}
+
+async function rafraichir() {
+  if (ongletActif === "reseau") rafraichirReseau();   // capture interrogée seulement si l'onglet est ouvert
+  try {
+    const [status, mesures, alertes] = await Promise.all([
+      lireJSON("/status"), lireJSON("/mesures?n=60"), lireJSON("/alertes?n=20"),
+    ]);
+    document.getElementById("point-serveur").className = "point ok";
+    document.getElementById("txt-serveur").textContent = "Serveur en ligne";
+
+    // Dernière mesure qui contient une température : ignore celles du capteur IR (presence seule)
+    const derniereMesureEnv = mesures.mesures.find(m => m.temperature !== undefined);
+    if (derniereMesureEnv) {
+      document.getElementById("temp").textContent = derniereMesureEnv.temperature ?? "--";
+      document.getElementById("gaz").textContent = derniereMesureEnv.gaz ?? "--";
+    }
+    afficherIA(status.ia, derniereMesureEnv);
+    memoriserIpCamera(alertes.alertes);
+    afficherNoeuds(status.noeuds);
+    afficherAlertes(alertes.alertes, status.total_alertes);
+    dessinerGraphe(mesures.mesures);
+  } catch (e) {
+    // Si le serveur tombe, la page ne plante pas : elle l'affiche et réessaie
+    document.getElementById("point-serveur").className = "point ko";
+    document.getElementById("txt-serveur").textContent = "Serveur injoignable";
+    console.error(e);
+  }
+}
+
+// ---------- Onglets ----------
+
+function changerOnglet(nom) {
+  ongletActif = nom;
+  document.querySelectorAll(".onglet").forEach(o => o.classList.toggle("actif", o.id === "onglet-" + nom));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.onglet === nom));
+  // Le flux vidéo ne tourne que si l'onglet est visible : économise le Wi-Fi
+  if (nom === "camera") demarrerFlux(); else arreterFlux();
+  if (nom === "reseau") rafraichirReseau();
+}
+
+// ---------- Réseau (capture tshark, voir capture_reseau.py) ----------
+
+function afficherCompteursReseau(reseau) {
+  const etat = document.getElementById("res-etat");
+  etat.textContent = reseau.actif ? "● EN COURS" : "ARRÊTÉE";
+  etat.style.color = reseau.actif ? "var(--ok)" : "var(--alerte)";
+  document.getElementById("res-debit").textContent = reseau.paquets_par_seconde ?? "--";
+  document.getElementById("res-total").textContent = reseau.total_paquets ?? "--";
+  document.getElementById("res-clair").textContent = reseau.paquets_en_clair ?? "--";
+  document.getElementById("res-avertissement").textContent = reseau.paquets_en_clair
+    ? `⚠ ${reseau.paquets_en_clair} paquets en clair : mesures et alertes lisibles par tout appareil connecté à Ultron.`
+    : "";
+}
+
+function afficherProtocoles(protocoles, protocolesEnClair) {
+  const ul = document.getElementById("res-protocoles");
+  const entrees = Object.entries(protocoles);
+  if (!entrees.length) { ul.innerHTML = '<li class="vide">Aucun paquet</li>'; return; }
+  const maximum = Math.max(...entrees.map(([, nombre]) => nombre));
+  ul.innerHTML = entrees.map(([nom, nombre]) => `
+    <li><b>${echapperHtml(nom)}</b> <span style="color:var(--doux)">${nombre}</span>
+      <div class="barre ${protocolesEnClair.includes(nom) ? "clair" : ""}"
+           style="width:${(nombre / maximum) * 100}%"></div></li>`).join("");
+}
+
+function afficherAppareils(appareils) {
+  const ul = document.getElementById("res-appareils");
+  if (!appareils.length) { ul.innerHTML = '<li class="vide">Aucun appareil</li>'; return; }
+  ul.innerHTML = appareils.map(a => `
+    <li><b>${echapperHtml(a.nom)}</b> <span class="mono">${echapperHtml(a.ip)}</span>
+      <br><small style="color:var(--doux)">${a.paquets} paquets · ${(a.octets / 1024).toFixed(1)} Ko ·
+        vu à ${echapperHtml(a.derniere_vue)}</small></li>`).join("");
+}
+
+function afficherTrames(trames) {
+  document.getElementById("res-trames").innerHTML = trames.map(t => `
+    <tr><td>${echapperHtml(t.heure)}</td>
+      <td class="mono">${echapperHtml(t.source)}</td>
+      <td class="mono">${echapperHtml(t.destination)}</td>
+      <td><span class="badge ${t.en_clair ? "clair" : ""}">${echapperHtml(t.protocole)}${t.en_clair ? " · EN CLAIR" : ""}</span></td>
+      <td>${t.taille} o</td>
+      <td>${echapperHtml(t.info)}</td></tr>`).join("");
+}
+
+async function rafraichirReseau() {
+  try {
+    const reseau = await lireJSON("/reseau");
+    afficherCompteursReseau(reseau);
+    if (!reseau.protocoles) return;   // capture jamais lancée : rien d'autre à afficher
+    afficherProtocoles(reseau.protocoles, reseau.protocoles_en_clair);
+    afficherAppareils(reseau.appareils);
+    afficherTrames(reseau.dernieres_trames);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ---------- Caméra (flux MJPEG servi par detection.py sur le PC) ----------
+
+const PORT_VIDEO = 8000;
+const DELAI_RECONNEXION = 5000;   // ms avant de réessayer si le flux est coupé
+let ongletActif = "vue";
+let ipDetectee = null;            // IP source de la dernière alerte YOLO = IP du PC caméra
+let minuteurReconnexion = null;
+
+function lireIpSauvegardee() {
+  try { return localStorage.getItem("ipCamera"); } catch { return null; }
+}
+
+function sauverIp(ip) {
+  try { localStorage.setItem("ipCamera", ip); } catch { /* navigateur privé : pas grave */ }
+}
+
+// Les alertes "intrus" viennent du PC qui fait tourner YOLO : leur IP source est celle de la caméra
+function memoriserIpCamera(alertes) {
+  const alerteYolo = alertes.find(a => a.alerte === "intrus");
+  if (alerteYolo) ipDetectee = alerteYolo.source;
+}
+
+function afficherEtatFlux(message, enErreur) {
+  document.getElementById("flux").style.display = enErreur ? "none" : "block";
+  const erreur = document.getElementById("flux-erreur");
+  erreur.style.display = enErreur ? "block" : "none";
+  erreur.textContent = message;
+}
+
+// Accepte "10.42.0.5", "localhost:8000" ou "http://10.42.0.5:8000/video" : on garde l'adresse seule
+function extraireAdresse(saisie) {
+  return saisie.trim().replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
+}
+
+function demarrerFlux() {
+  clearTimeout(minuteurReconnexion);
+  const champIp = document.getElementById("ip-camera");
+  if (!champIp.value) champIp.value = lireIpSauvegardee() || ipDetectee || "";
+  const ip = extraireAdresse(champIp.value);
+  champIp.value = ip;   // affiche l'adresse nettoyée
+  if (!ip) { afficherEtatFlux("Indique l'IP du PC qui lance detection.py", true); return; }
+
+  sauverIp(ip);
+  document.getElementById("etat-camera").textContent = "connexion à " + ip + "…";
+  afficherEtatFlux("", false);
+  // ?t= rend l'URL unique : force le navigateur à ouvrir une nouvelle connexion
+  document.getElementById("flux").src = `http://${ip}:${PORT_VIDEO}/video?t=${Date.now()}`;
+}
+
+function arreterFlux() {
+  clearTimeout(minuteurReconnexion);
+  document.getElementById("flux").removeAttribute("src");   // ferme la connexion au PC
+}
+
+function fluxEnErreur() {
+  if (ongletActif !== "camera") return;   // erreur provoquée par arreterFlux : on ignore
+  document.getElementById("etat-camera").textContent = "";
+  afficherEtatFlux("Flux indisponible : detection.py lancé ? bonne IP ? pare-feu Windows ? " +
+                   "Nouvel essai dans 5 s…", true);
+  minuteurReconnexion = setTimeout(demarrerFlux, DELAI_RECONNEXION);
+}
+
+document.getElementById("flux").onload = () => {
+  document.getElementById("etat-camera").textContent = "● en direct";
+};
+document.getElementById("flux").onerror = fluxEnErreur;
+document.getElementById("btn-camera").onclick = demarrerFlux;
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => changerOnglet(b.dataset.onglet));
+
+rafraichir();
+setInterval(rafraichir, INTERVALLE);
+</script>
+</body>
+</html>
