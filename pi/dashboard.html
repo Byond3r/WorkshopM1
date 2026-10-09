@@ -187,9 +187,24 @@
 const INTERVALLE = 2000;          // rafraîchissement toutes les 2 s
 const DUREE_BANDEAU = 10;         // secondes d'affichage du bandeau après une alerte
 
+// Écart entre l'horloge du Pi et celle du navigateur (ms). Sans internet, le Pi n'a pas l'heure exacte :
+// les horodatages viennent du Pi, on les compare donc à l'heure du Pi, pas à celle du PC.
+let decalageHorlogeServeur = 0;
+
+function mettreAJourDecalage(reponse) {
+  const dateServeur = reponse.headers.get("Date");   // en-tête HTTP ajouté par le serveur à chaque réponse
+  if (dateServeur) decalageHorlogeServeur = new Date(dateServeur).getTime() - Date.now();
+}
+
+// Heure actuelle selon le Pi
+function maintenantServeur() {
+  return Date.now() + decalageHorlogeServeur;
+}
+
 async function lireJSON(url) {
   const rep = await fetch(url, { cache: "no-store" });
   if (!rep.ok) throw new Error(url + " -> " + rep.status);
+  mettreAJourDecalage(rep);
   return rep.json();
 }
 
@@ -217,6 +232,8 @@ function afficherNoeuds(noeuds) {
 const NOEUD_PI = "pi-1";
 const DUREE_EVENEMENT = 10;   // secondes pendant lesquelles une détection reste affichée en rouge
 const CAPTEURS_PI = [
+  { champ: "mouvement_1", nom: "Mouvement zone 1 (PIR)", alerte: "PRÉSENCE DÉTECTÉE" },
+  { champ: "mouvement_2", nom: "Mouvement zone 2 (PIR)", alerte: "PRÉSENCE DÉTECTÉE" },
   { champ: "proximite", nom: "Proximité (anti-sabotage)", alerte: "OBJET CONTRE LE BOÎTIER" },
   { champ: "son", nom: "Son", alerte: "BRUIT DÉTECTÉ" },
 ];
@@ -235,7 +252,7 @@ function afficherCapteursPi(mesures) {
   }
   ul.innerHTML = CAPTEURS_PI.map(capteur => {
     const detection = derniereDetection(mesures, capteur.champ);
-    const ageSecondes = detection ? (Date.now() - new Date(detection.horodatage).getTime()) / 1000 : Infinity;
+    const ageSecondes = detection ? (maintenantServeur() - new Date(detection.horodatage).getTime()) / 1000 : Infinity;
     const enAlerte = ageSecondes < DUREE_EVENEMENT;
     const etat = enAlerte ? `<b style="color:var(--alerte)">${capteur.alerte}</b>` : "calme";
     return `<li><span class="point ${enAlerte ? "ko" : "ok"}"></span><b>${capteur.nom}</b> — ${etat}
@@ -276,7 +293,7 @@ function afficherAlertes(alertes, total) {
 function afficherBandeau(alertes, systemeArme) {
   const derniereGrave = alertes.find(a => typeAlerte(a).grave);
   const recente = derniereGrave &&
-    (Date.now() - new Date(derniereGrave.horodatage).getTime()) / 1000 < DUREE_BANDEAU;
+    (maintenantServeur() - new Date(derniereGrave.horodatage).getTime()) / 1000 < DUREE_BANDEAU;
   const badgeInconnu = recente && derniereGrave.alerte === "badge_inconnu";
   const bandeau = document.getElementById("bandeau");
   bandeau.style.display = (badgeInconnu || (recente && systemeArme)) ? "block" : "none";
@@ -507,8 +524,15 @@ function demarrerFlux() {
   sauverIp(ip);
   document.getElementById("etat-camera").textContent = "connexion à " + ip + "…";
   afficherEtatFlux("", false);
-  // ?t= rend l'URL unique : force le navigateur à ouvrir une nouvelle connexion
-  document.getElementById("flux").src = `http://${ip}:${PORT_VIDEO}/video?t=${Date.now()}`;
+  document.getElementById("flux").src = urlFluxCamera(ip);
+}
+
+// En HTTPS, le navigateur refuse une image venue d'une adresse HTTP (contenu mixte) :
+// le flux passe alors par le Pi (/camera), qui le relaie en HTTPS. En HTTP, on lit directement le PC.
+function urlFluxCamera(ip) {
+  const unique = Date.now();   // ?t= rend l'URL unique : force le navigateur à ouvrir une nouvelle connexion
+  if (location.protocol === "https:") return `/camera?ip=${encodeURIComponent(ip)}&t=${unique}`;
+  return `http://${ip}:${PORT_VIDEO}/video?t=${unique}`;
 }
 
 function arreterFlux() {
@@ -519,7 +543,8 @@ function arreterFlux() {
 function fluxEnErreur() {
   if (ongletActif !== "camera") return;   // erreur provoquée par arreterFlux : on ignore
   document.getElementById("etat-camera").textContent = "";
-  afficherEtatFlux("Flux indisponible : detection.py lancé ? bonne IP ? pare-feu Windows ? " +
+  const conseilHttps = location.protocol === "https:" ? "IP du PC sur Ultron (10.42.0.x, pas localhost) ? " : "";
+  afficherEtatFlux("Flux indisponible : detection.py lancé ? " + conseilHttps + "bonne IP ? pare-feu Windows ? " +
                    "Nouvel essai dans 5 s…", true);
   minuteurReconnexion = setTimeout(demarrerFlux, DELAI_RECONNEXION);
 }

@@ -1,0 +1,30 @@
+# Durcissement des services systemd (2026-10-09 11:45)
+# Fichier drop-in pi/durcissement-systemd.conf installé dans /etc/systemd/system/<service>.service.d/
+# Équivalent de cap_drop: ALL + no-new-privileges + read_only de Docker.
+
+--- Directives appliquées (sentinel et sentinel-capteurs)
+NoNewPrivileges=yes          aucun gain de privilèges possible (sudo, setuid), même si le service est piraté
+CapabilityBoundingSet=       aucune capacité root
+ProtectSystem=full           /usr, /boot et /etc en lecture seule pour le service
+PrivateTmp=yes               /tmp privé
+MemoryMax=400M               un emballement ne peut pas saturer les 2 Go du Pi
+
+--- Note d'exposition : systemd-analyze security (0 = très protégé, 10 = très exposé)
+Service              Avant           Après
+sentinel             9.2 UNSAFE      6.1 MEDIUM
+sentinel-capteurs    9.2 UNSAFE      6.1 MEDIUM
+sentinel-reseau      9.6 UNSAFE      9.6 UNSAFE   (non modifié : la capture réseau a besoin des droits root)
+
+--- Login du dashboard (authentification HTTP Basic, empreinte scrypt, routes de consultation uniquement)
+GET /status sans identifiant      -> 401
+GET /status mauvais mot de passe  -> 401
+GET /status bons identifiants     -> 200
+GET / bons identifiants           -> 200
+POST /mesure des capteurs du Pi   -> 200 (les envois des capteurs ne demandent pas de login)
+Durée d'une vérification : identique pour un mauvais utilisateur et un mauvais mot de passe (~100 ms),
+pour ne pas révéler par chronométrage quels noms d'utilisateur existent.
+
+--- Droits des fichiers après redémarrage
+-rw------- identifiants_dashboard.txt
+-rw------- sentinel.db
+-rw------- serveur.log

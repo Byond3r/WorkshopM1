@@ -20,3 +20,6 @@ badges_autorises.txt
 
 # Notes de préparation de la démo : usage interne, pas un livrable
 docs/deroule_demo.md
+
+# Login du dashboard (empreinte du mot de passe)
+identifiants_dashboard.txt

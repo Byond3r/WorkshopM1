@@ -1,5 +1,5 @@
 [Unit]
-Description=Sentinel-X - capteurs du Pi (proximite IR, son)
+Description=Sentinel-X - capteurs du Pi (mouvement PIR, proximite IR, son)
 After=sentinel.service
 Wants=sentinel.service
 
