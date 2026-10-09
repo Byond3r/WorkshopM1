@@ -1,0 +1,13 @@
+# Ports en écoute sur le Pi APRÈS durcissement et activation du HTTPS (relevé du 2026-10-08 14:36)
+# Commande : ss -ltn   (comparer avec ports_avant.txt)
+0.0.0.0:22        sshd      SSH (administration, connexion root interdite, limité par ufw)
+0.0.0.0:5000      python3   Flask HTTP : dashboard + API (ufw : réseau Ultron uniquement)
+0.0.0.0:5443      python3   Flask HTTPS : envois chiffrés de l'ESP32 et de la caméra (ufw : Ultron uniquement)
+[::]:22           sshd      SSH (IPv6)
+
+# Disparus depuis ports_avant.txt :
+#   111/tcp et 111/udp   rpcbind   désactivé (systemctl disable --now rpcbind.service rpcbind.socket)
+# Non traité (relevé TCP uniquement) :
+#   5353/udp   avahi-daemon (découverte mDNS) n'a pas été désactivé. ufw autorise par défaut le
+#              mDNS en multicast (224.0.0.251:5353, règle intégrée de before.rules).
+#              Recommandation : sudo systemctl disable --now avahi-daemon avahi-daemon.socket
