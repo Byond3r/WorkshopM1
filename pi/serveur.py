@@ -1,13 +1,16 @@
+import ipaddress
 import json
 import logging
 import secrets
 import sqlite3
 import threading
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, request, send_from_directory
+from flask import Flask, Response, request, send_from_directory
+from werkzeug.security import check_password_hash
 from werkzeug.serving import make_server
 
 # Chemins ABSOLUS : sous systemd, le dossier courant n'est pas celui du script
@@ -21,9 +24,13 @@ PORT_HTTP = 5000            # dashboard (et anciens envois en clair)
 PORT_HTTPS = 5443           # envois chiffrés (TLS) de l'ESP32 et de detection.py
 CERTIFICAT_TLS = DOSSIER / "tls" / "certificat.pem"   # créés par generer_certificat.sh
 CLE_TLS = DOSSIER / "tls" / "cle.pem"
+RESEAU_ULTRON = ipaddress.ip_network("10.42.0.0/24")
+PORT_CAMERA = 8000   # flux MJPEG servi par pc/detection.py
 # Badges RFID : fichiers propres au Pi, jamais versionnés dans git
 FICHIER_BADGES = DOSSIER / "badges_autorises.txt"   # une ligne par badge : UID;nom
 FICHIER_CLE_API = DOSSIER / "cle_api.txt"          # secret partagé avec l'ESP32
+# Login du dashboard : une ligne "utilisateur:empreinte du mot de passe" (jamais le mot de passe en clair)
+FICHIER_IDENTIFIANTS = DOSSIER / "identifiants_dashboard.txt"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +40,8 @@ logging.basicConfig(
 log = logging.getLogger("sentinel")
 
 app = Flask(__name__)
+# Au-delà, Flask refuse la requête (erreur 413) : empêche de remplir la carte SD avec d'énormes JSON
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024
 demarrage = datetime.now()
 systeme_arme = True   # au démarrage, le système est armé (choix le plus sûr)
 
@@ -141,14 +150,100 @@ def ligne_vers_dict(ligne):
     }
 
 
+# ---------- Login du dashboard (authentification HTTP Basic) ----------
+# Seules les routes de CONSULTATION sont protégées : les envois des capteurs (POST) ne sont pas concernés.
+ROUTES_CONSULTATION = {"dashboard", "lister_mesures", "lister_alertes", "status", "reseau", "relayer_camera"}
+
+
+def identifiants_valides(autorisation):
+    if autorisation is None or not FICHIER_IDENTIFIANTS.exists():
+        return False   # sans fichier d'identifiants, personne n'entre (on ne laisse pas ouvert par défaut)
+    utilisateur, _, empreinte = FICHIER_IDENTIFIANTS.read_text(encoding="utf-8").strip().partition(":")
+    # Les deux vérifications sont TOUJOURS faites : si un mauvais nom d'utilisateur répondait plus vite
+    # qu'un mauvais mot de passe, un attaquant pourrait deviner les noms valides en chronométrant
+    utilisateur_ok = secrets.compare_digest(autorisation.username or "", utilisateur)
+    mot_de_passe_ok = check_password_hash(empreinte, autorisation.password or "")
+    return utilisateur_ok and mot_de_passe_ok
+
+
+@app.before_request
+def proteger_consultation():
+    if request.endpoint in ROUTES_CONSULTATION and not identifiants_valides(request.authorization):
+        # WWW-Authenticate demande au navigateur d'afficher sa fenêtre de connexion
+        return Response("Authentification requise", 401, {"WWW-Authenticate": 'Basic realm="Sentinel-X"'})
+    return None
+
+
+# ---------- Validation des données reçues ----------
+# Liste blanche : seuls ces champs sont acceptés. Sans ça, un JSON contenant "horodatage" ou "source"
+# écraserait ces colonnes à l'affichage (ligne_vers_dict), et n'importe quoi finirait dans la base.
+CHAMPS_NUMERIQUES_MESURE = {"temperature": (-40, 125), "gaz": (0, 10000)}   # plages physiques plausibles
+CHAMPS_BINAIRES_MESURE = {"mouvement_1", "mouvement_2", "proximite", "son"}  # 0 ou 1
+LONGUEUR_MAX_TEXTE = 32
+LONGUEUR_MAX_UID = 20
+
+
+def est_nombre(valeur):
+    # En Python, True est aussi un int : on l'exclut explicitement
+    return isinstance(valeur, (int, float)) and not isinstance(valeur, bool)
+
+
+def erreur_texte(data, champ):
+    """Message d'erreur si le champ n'est pas un texte court, sinon None."""
+    valeur = data.get(champ)
+    if not isinstance(valeur, str) or not 0 < len(valeur) <= LONGUEUR_MAX_TEXTE:
+        return f"'{champ}' doit être un texte de 1 à {LONGUEUR_MAX_TEXTE} caractères"
+    return None
+
+
+def erreur_champs_inconnus(data, champs_autorises):
+    inconnus = set(data) - champs_autorises
+    return f"champ(s) non autorisé(s) : {', '.join(sorted(inconnus))}" if inconnus else None
+
+
+def erreur_mesure(data):
+    """Raison du refus d'une mesure, ou None si elle est valide."""
+    if not isinstance(data, dict):
+        return "objet JSON attendu"
+    champs_autorises = {"capteur"} | set(CHAMPS_NUMERIQUES_MESURE) | CHAMPS_BINAIRES_MESURE
+    erreur = erreur_champs_inconnus(data, champs_autorises) or erreur_texte(data, "capteur")
+    if erreur:
+        return erreur
+    for champ, (minimum, maximum) in CHAMPS_NUMERIQUES_MESURE.items():
+        if champ in data and not (est_nombre(data[champ]) and minimum <= data[champ] <= maximum):
+            return f"'{champ}' doit être un nombre entre {minimum} et {maximum}"
+    for champ in CHAMPS_BINAIRES_MESURE:
+        if champ in data and data[champ] not in (0, 1):
+            return f"'{champ}' doit valoir 0 ou 1"
+    return None
+
+
+def erreur_alerte(data):
+    """Raison du refus d'une alerte, ou None si elle est valide."""
+    if not isinstance(data, dict):
+        return "objet JSON attendu"
+    erreur = erreur_champs_inconnus(data, {"alerte", "confiance"}) or erreur_texte(data, "alerte")
+    if erreur:
+        return erreur
+    if "confiance" in data and not (est_nombre(data["confiance"]) and 0 <= data["confiance"] <= 1):
+        return "'confiance' doit être un nombre entre 0 et 1"
+    return None
+
+
+def uid_valide(uid):
+    """Un UID de badge est un court texte hexadécimal (ex. A1B2C3D4)."""
+    return 0 < len(uid) <= LONGUEUR_MAX_UID and all(c in "0123456789ABCDEF" for c in uid)
+
+
 # ---------- Réception ----------
 
 @app.route("/mesure", methods=["POST"])
 def recevoir_mesure():
     data = request.get_json(silent=True)
-    if data is None:
-        log.warning("Mesure invalide reçue de %s", request.remote_addr)
-        return {"status": "erreur", "message": "JSON attendu"}, 400
+    erreur = erreur_mesure(data)
+    if erreur:
+        log.warning("Mesure refusée de %s : %s", request.remote_addr, erreur)
+        return {"status": "erreur", "message": erreur}, 400
 
     data = analyser(data)   # verdict de l'IA ajouté avant l'enregistrement
 
@@ -176,9 +271,10 @@ def enregistrer_alerte(source, data):
 @app.route("/alerte", methods=["POST"])
 def recevoir_alerte():
     data = request.get_json(silent=True)
-    if data is None:
-        log.warning("Alerte invalide reçue de %s", request.remote_addr)
-        return {"status": "erreur", "message": "JSON attendu"}, 400
+    erreur = erreur_alerte(data)
+    if erreur:
+        log.warning("Alerte refusée de %s : %s", request.remote_addr, erreur)
+        return {"status": "erreur", "message": erreur}, 400
     enregistrer_alerte(request.remote_addr, data)
     return {"status": "ok"}
 
@@ -212,8 +308,11 @@ def recevoir_badge():
         log.warning("Badge refusé : clé API invalide (%s)", request.remote_addr)
         return {"status": "erreur", "message": "clé API invalide"}, 401
 
-    data = request.get_json(silent=True) or {}
-    uid = str(data.get("uid", "")).upper()
+    data = request.get_json(silent=True)
+    uid = str(data.get("uid", "")).upper() if isinstance(data, dict) else ""
+    if not uid_valide(uid):
+        log.warning("Badge refusé de %s : UID invalide", request.remote_addr)
+        return {"status": "erreur", "message": "UID de badge invalide"}, 400
     badges = lire_badges_autorises()
 
     if uid not in badges:
@@ -291,9 +390,36 @@ def reseau():
     return statistiques
 
 
+@app.route("/camera", methods=["GET"])
+def relayer_camera():
+    """Relaie le flux vidéo du PC : le dashboard en HTTPS l'affiche sans contenu mixte (HTTP dans HTTPS)."""
+    try:
+        adresse = ipaddress.ip_address(request.args.get("ip", ""))
+    except ValueError:
+        return {"status": "erreur", "message": "IP invalide"}, 400
+    # Seulement vers une machine d'Ultron, port et chemin fixes : sinon le Pi pourrait servir
+    # de relais vers n'importe quelle adresse (attaque SSRF)
+    if adresse not in RESEAU_ULTRON:
+        return {"status": "erreur", "message": "IP hors du réseau Ultron"}, 403
+    try:
+        flux = urllib.request.urlopen(f"http://{adresse}:{PORT_CAMERA}/video", timeout=5)
+    except OSError:
+        return {"status": "erreur", "message": "caméra injoignable"}, 502
+
+    def relayer():
+        try:
+            # read1 renvoie ce qui est déjà arrivé, sans attendre 16 Ko : l'image s'affiche sans retard
+            while bloc := flux.read1(16384):
+                yield bloc
+        finally:
+            flux.close()   # le navigateur a fermé l'onglet : on coupe aussi la connexion vers le PC
+
+    return Response(relayer(), content_type=flux.headers.get("Content-Type"))
+
+
 # ---------- Dashboard ----------
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def dashboard():
     return send_from_directory(DOSSIER, "dashboard.html")
 
@@ -312,7 +438,14 @@ def demarrer_https():
     log.info("HTTPS actif sur le port %d", PORT_HTTPS)
 
 
+def proteger_fichiers():
+    """Base et journal lisibles par le seul utilisateur du service (en plus du dossier déjà en 700)."""
+    for fichier in (FICHIER_BDD, FICHIER_LOG):
+        fichier.chmod(0o600)
+
+
 init_bdd()
+proteger_fichiers()
 entrainer()   # si la base contient déjà assez de mesures, le modèle est prêt dès le démarrage
 
 if __name__ == "__main__":

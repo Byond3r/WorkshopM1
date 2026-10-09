@@ -1,0 +1,13 @@
+# Nmap 7.92 scan initiated 2026-10-09 11:36 (heure de Paris)
+# Commande : nmap -sT -sV -Pn -T4 -p 1-1024,5000,5443,8000 10.105.175.134
+# Scan depuis le PC connecté au réseau Xiaomi (10.105.175.156), donc HORS du réseau Ultron : vue d'un attaquant extérieur.
+# Seul SSH (22) répond, en « tcpwrapped » : la limite anti force brute d'ufw coupe les connexions répétées du scan.
+# Juste après ce scan, le PC a été bloqué ~30 s en SSH par cette même limite.
+Nmap scan report for 10.105.175.134
+Host is up (0.0094s latency).
+Not shown: 1026 filtered tcp ports (no-response)
+PORT   STATE SERVICE    VERSION
+22/tcp open  tcpwrapped
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+# Nmap done at Fri Oct  9 11:40:41 2026 -- 1 IP address (1 host up) scanned in 225.09 seconds

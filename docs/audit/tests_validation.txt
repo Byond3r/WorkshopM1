@@ -1,0 +1,37 @@
+# Tests de validation des données reçues par le serveur (2026-10-09 11:16)
+# serveur.py exécuté sur le Pi dans un dossier temporaire (base de test), via le client de test de Flask.
+# Code HTTP   Cas testé                                      Raison renvoyée par le serveur
+
+--- Envois légitimes : doivent passer (200)
+200  mesure ESP32
+200  mesure capteurs du Pi
+200  injection de la démo (85 °C, 950 ppm)
+200  alerte YOLO
+
+--- Envois malveillants ou absurdes : doivent être refusés
+400  température en texte                           'temperature' doit être un nombre entre -40 et 125
+400  température absurde (9999 °C)                  'temperature' doit être un nombre entre -40 et 125
+400  champ horodatage (falsification)               champ(s) non autorisé(s) : horodatage
+400  capteur manquant                               'capteur' doit être un texte de 1 à 32 caractères
+400  son = 5                                        'son' doit valoir 0 ou 1
+400  liste au lieu d'un objet                       objet JSON attendu
+413  requête de 5 Ko (saturation)                   (limite : 4 Ko par requête)
+400  alerte qui force systeme_arme                  champ(s) non autorisé(s) : systeme_arme
+400  confiance = 2                                  'confiance' doit être un nombre entre 0 et 1
+400  badge avec UID non hexadécimal                 UID de badge invalide
+
+--- Droits des fichiers après démarrage du serveur
+droits de sentinel.db : 0o600
+droits de serveur.log : 0o600
+
+--- Sauvegarde (sauvegarder_bdd.py)
+-rw------- 1 user user  sentinel_20261009_111640.db   (copie cohérente, droits 600)
+
+--- Relais vidéo du dashboard HTTPS (route /camera), 2026-10-09 12:10, instance de test
+401  sans login
+400  IP invalide                                    IP invalide
+403  IP hors Ultron (8.8.8.8)                       IP hors du réseau Ultron
+403  SSRF vers le Pi lui-même (127.0.0.1)           IP hors du réseau Ultron
+502  IP Ultron sans caméra (10.42.0.250)            caméra injoignable (réponse en 0,1 s)
+200  relais réel depuis un faux serveur vidéo       3 images sur 3 reçues intactes, type multipart/x-mixed-replace
+Test réel ensuite dans Firefox sur Ultron : https://10.42.0.1:5443, login, flux YOLO affiché via le Pi.

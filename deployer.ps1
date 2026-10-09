@@ -7,7 +7,7 @@ $DOSSIER_PI = "/home/user/sentinel/"
 $FICHIERS = @(
     "pi/serveur.py", "pi/dashboard.html", "pi/capture_reseau.py", "pi/capteurs_pi.py",
     "pi/sentinel.service", "pi/sentinel-reseau.service", "pi/sentinel-capteurs.service", "pi/installer.sh", "pi/durcir.sh",
-    "pi/generer_certificat.sh"
+    "pi/generer_certificat.sh", "pi/sauvegarder_bdd.py", "pi/durcissement-systemd.conf"
 )
 
 Write-Host "Copie des fichiers vers $PI ..."
