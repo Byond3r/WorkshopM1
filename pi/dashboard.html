@@ -42,6 +42,10 @@
              padding: 12px; font-weight: 700; letter-spacing: 2px;
              animation: clignote 1s infinite; }
   @keyframes clignote { 50% { opacity: .55; } }
+  /* État du système (badge RFID) : armé = rouge, désarmé = gris */
+  .etat-systeme { margin-right: 18px; padding: 4px 10px; border-radius: 6px; font-weight: 700;
+                  letter-spacing: 1px; border: 1px solid var(--bord); color: var(--doux); }
+  .etat-systeme.arme { color: var(--alerte); border-color: var(--alerte); }
   /* Onglets : un seul <main class="onglet"> visible à la fois */
   nav { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--bord); }
   nav button { background: none; border: none; border-bottom: 2px solid transparent;
@@ -81,7 +85,8 @@
 <div id="bandeau">⚠ INTRUSION DÉTECTÉE ⚠</div>
 <header>
   <h1>SENTINEL<span>-X</span></h1>
-  <div id="serveur"><span class="point" id="point-serveur"></span><span id="txt-serveur">Connexion…</span></div>
+  <div id="serveur"><span id="etat-systeme" class="etat-systeme"></span>
+    <span class="point" id="point-serveur"></span><span id="txt-serveur">Connexion…</span></div>
 </header>
 
 <nav>
@@ -107,6 +112,10 @@
   <div class="carte">
     <h2>Nœuds capteurs</h2>
     <ul id="noeuds"><li class="vide">Aucun nœud</li></ul>
+  </div>
+  <div class="carte">
+    <h2>Capteurs du Pi</h2>
+    <ul id="capteurs-pi"><li class="vide">En attente du nœud pi-1…</li></ul>
   </div>
 
   <div class="carte large">
@@ -203,21 +212,81 @@ function afficherNoeuds(noeuds) {
     </li>`).join("");
 }
 
+// ---------- Capteurs physiques du Pi (capteurs_pi.py) ----------
+
+const NOEUD_PI = "pi-1";
+const DUREE_EVENEMENT = 10;   // secondes pendant lesquelles une détection reste affichée en rouge
+const CAPTEURS_PI = [
+  { champ: "proximite", nom: "Proximité (anti-sabotage)", alerte: "OBJET CONTRE LE BOÎTIER" },
+  { champ: "son", nom: "Son", alerte: "BRUIT DÉTECTÉ" },
+];
+
+// Une détection peut ne durer que 2 s : on cherche la plus récente dans l'historique
+// au lieu de lire seulement la dernière mesure (sinon on la raterait entre deux rafraîchissements)
+function derniereDetection(mesures, champ) {
+  return mesures.find(m => m.capteur === NOEUD_PI && m[champ] === 1);
+}
+
+function afficherCapteursPi(mesures) {
+  const ul = document.getElementById("capteurs-pi");
+  if (!mesures.some(m => m.capteur === NOEUD_PI)) {
+    ul.innerHTML = '<li class="vide">Aucune mesure du Pi : capteurs_pi.py est-il lancé ?</li>';
+    return;
+  }
+  ul.innerHTML = CAPTEURS_PI.map(capteur => {
+    const detection = derniereDetection(mesures, capteur.champ);
+    const ageSecondes = detection ? (Date.now() - new Date(detection.horodatage).getTime()) / 1000 : Infinity;
+    const enAlerte = ageSecondes < DUREE_EVENEMENT;
+    const etat = enAlerte ? `<b style="color:var(--alerte)">${capteur.alerte}</b>` : "calme";
+    return `<li><span class="point ${enAlerte ? "ko" : "ok"}"></span><b>${capteur.nom}</b> — ${etat}
+      <br><small style="color:var(--doux)">dernière détection : ${detection ? heure(detection.horodatage) : "aucune"}</small></li>`;
+  }).join("");
+}
+
+// Libellé affiché et gravité de chaque type d'alerte (les types inconnus restent affichés tels quels)
+const TYPES_ALERTE = {
+  intrus:        { libelle: "INTRUSION",        grave: true },
+  badge_inconnu: { libelle: "BADGE INCONNU",    grave: true },
+  armement:      { libelle: "SYSTÈME ARMÉ",     grave: false },
+  desarmement:   { libelle: "SYSTÈME DÉSARMÉ",  grave: false },
+};
+
+function typeAlerte(alerte) {
+  return TYPES_ALERTE[alerte.alerte] ?? { libelle: String(alerte.alerte ?? "alerte").toUpperCase(), grave: true };
+}
+
+function detailsAlerte(alerte) {
+  if (alerte.confiance !== undefined) return ` · confiance ${Math.round(alerte.confiance * 100)} %`;
+  if (alerte.nom) return ` · ${echapperHtml(alerte.nom)}`;
+  if (alerte.uid) return ` · badge ${echapperHtml(alerte.uid)}`;
+  return "";
+}
+
 function afficherAlertes(alertes, total) {
   document.getElementById("nb-alertes").textContent = total ? `(${total})` : "";
   const ul = document.getElementById("alertes");
-  if (!alertes.length) { ul.innerHTML = '<li class="vide">Aucune alerte</li>'; }
-  else {
-    ul.innerHTML = alertes.map(a => `
-      <li><span class="point ko"></span><b>${heure(a.horodatage)}</b> —
-        ${echapperHtml(String(a.alerte ?? "alerte").toUpperCase())}
-        ${a.confiance !== undefined ? ` · confiance ${Math.round(a.confiance * 100)} %` : ""}
-        <small style="color:var(--doux)"> · ${echapperHtml(a.source)}</small></li>`).join("");
-  }
-  // Bandeau si la dernière alerte date de moins de DUREE_BANDEAU secondes
-  const recente = alertes.length &&
-    (Date.now() - new Date(alertes[0].horodatage).getTime()) / 1000 < DUREE_BANDEAU;
-  document.getElementById("bandeau").style.display = recente ? "block" : "none";
+  if (!alertes.length) { ul.innerHTML = '<li class="vide">Aucune alerte</li>'; return; }
+  ul.innerHTML = alertes.map(a => `
+    <li><span class="point ${typeAlerte(a).grave ? "ko" : "ok"}"></span><b>${heure(a.horodatage)}</b> —
+      ${echapperHtml(typeAlerte(a).libelle)}${detailsAlerte(a)}
+      <small style="color:var(--doux)"> · ${echapperHtml(a.source)}</small></li>`).join("");
+}
+
+// Bandeau rouge : une intrusion pendant que le système est armé, ou un badge inconnu (toujours suspect)
+function afficherBandeau(alertes, systemeArme) {
+  const derniereGrave = alertes.find(a => typeAlerte(a).grave);
+  const recente = derniereGrave &&
+    (Date.now() - new Date(derniereGrave.horodatage).getTime()) / 1000 < DUREE_BANDEAU;
+  const badgeInconnu = recente && derniereGrave.alerte === "badge_inconnu";
+  const bandeau = document.getElementById("bandeau");
+  bandeau.style.display = (badgeInconnu || (recente && systemeArme)) ? "block" : "none";
+  bandeau.textContent = badgeInconnu ? "⚠ BADGE INCONNU : TENTATIVE D'ACCÈS ⚠" : "⚠ INTRUSION DÉTECTÉE ⚠";
+}
+
+function afficherEtatSysteme(systemeArme) {
+  const etat = document.getElementById("etat-systeme");
+  etat.textContent = systemeArme ? "● ARMÉ" : "○ DÉSARMÉ";
+  etat.className = systemeArme ? "etat-systeme arme" : "etat-systeme";
 }
 
 function afficherIA(ia, mesure) {
@@ -295,7 +364,11 @@ async function rafraichir() {
     afficherIA(status.ia, derniereMesureEnv);
     memoriserIpCamera(alertes.alertes);
     afficherNoeuds(status.noeuds);
+    afficherCapteursPi(mesures.mesures);
     afficherAlertes(alertes.alertes, status.total_alertes);
+    const systemeArme = status.systeme_arme !== false;   // ancien serveur sans ce champ : considéré armé
+    afficherBandeau(alertes.alertes, systemeArme);
+    afficherEtatSysteme(systemeArme);
     dessinerGraphe(mesures.mesures);
   } catch (e) {
     // Si le serveur tombe, la page ne plante pas : elle l'affiche et réessaie
